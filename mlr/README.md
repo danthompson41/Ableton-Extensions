@@ -37,11 +37,15 @@ slices stacked across the shared scenes.
 
    ![MLR slicing interface](images/MLR%20-%20Slicing%20Interface.png)
 
-> **Follow Actions:** Live's Follow Actions are *not* exposed by the 1.0.0 SDK,
-> so slices repeat using the clip **loop brace** instead. A looped Session clip
-> plays indefinitely when launched — the same "keep repeating" result a
-> *Play Again* follow action gives you. (Follow-action chaining between slices
-> isn't possible until the SDK adds the property.)
+> **Follow Actions (set these manually):** Live's Follow Actions are *not*
+> exposed by the 1.0.0 SDK, so the extension can't set them for you — if you
+> want slices to chain (e.g. advance to the next slice, or jump around), you
+> must add the Follow Actions **by hand** in Live after slicing, on each clip's
+> *Launch* tab. Out of the box, slices repeat using the clip **loop brace**
+> instead: a looped Session clip plays indefinitely when launched — the same
+> "keep repeating" result a *Play Again* follow action gives you. Follow-action
+> chaining between slices isn't possible automatically until the SDK adds the
+> property.
 6. A new `MLR · <clip>` track appears with one looping, rainbow-colored slice per
    scene. Trigger them from your grid.
 

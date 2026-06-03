@@ -1,1 +1,10 @@
+# Dependencies
 node_modules
+
+# Build output (regeneratable; the bundle is shipped inside the .ablx)
+dist/
+
+# macOS
+.DS_Store
+
+# Note: .ablx packages are intentionally checked in.
