@@ -1,7 +1,7 @@
 {
-  "name": "mlr",
+  "name": "project-sync",
   "version": "1.0.0",
-  "description": "MLR — monome/norns-style loop slicing across the Session grid",
+  "description": "Project Sync — read-only inspector for everything the Live Extensions SDK exposes about the current Set",
   "license": "ISC",
   "author": "",
   "type": "module",

@@ -6,9 +6,10 @@ build setup, and README.
 
 ## Extensions
 
-| Extension          | Description                                                              |
-| ------------------ | ------------------------------------------------------------------------ |
-| [`mlr/`](mlr/)     | A monome/norns **MLR**-style loop chopper — slices a warped audio clip into N equal segments mapped across the Session View grid. |
+| Extension                              | Description                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| [`mlr/`](mlr/)                         | A monome/norns **MLR**-style loop chopper — slices a warped audio clip into N equal segments mapped across the Session View grid. |
+| [`project_sync/`](project_sync/)       | **Project Sync** — read-only inspector that walks the current Set and shows every piece of metadata the SDK exposes (song, tracks, devices, clips, scenes, …) in a searchable tree. |
 
 ## Getting started
 
@@ -25,12 +26,17 @@ See the individual extension's README for usage details.
 
 ```
 extensions/
-├── mlr/            # MLR — Grid Slicer
-│   ├── src/        # extension source (TypeScript + HTML dialogs)
-│   ├── build.ts    # esbuild bundling
+├── mlr/                # MLR — Grid Slicer
+│   ├── src/            # extension source (TypeScript + HTML dialogs)
+│   ├── build.ts        # esbuild bundling
 │   ├── manifest.json
 │   └── README.md
-└── README.md       # this file
+├── project_sync/       # Project Sync — SDK metadata inspector
+│   ├── src/            # extension source + tree-view dialog
+│   ├── build.ts
+│   ├── manifest.json
+│   └── README.md
+└── README.md           # this file
 ```
 
 The SDK and CLI are consumed as local `.tgz` packages referenced from each
