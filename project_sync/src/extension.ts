@@ -3,7 +3,6 @@ import {
   AudioClip,
   AudioTrack,
   Track,
-  Clip,
   CuePoint,
   GridQuantization,
   WarpMode,
@@ -12,15 +11,31 @@ import {
   type ExtensionContext,
 } from "@ableton-extensions/sdk";
 
+import { writeFile, mkdir } from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
+
 import dialogHtml from "./project-sync.html";
 
 type ApiVersion = "1.0.0";
 
+// Every scope listed in the SDK's ContextMenuScope union, so the action
+// shows up on any right-clickable surface in Live (tracks, clips, slots,
+// scenes, racks, samples, simpler instances, and arrangement/clip-slot
+// selections). See api/types/ContextMenuScope.html.
 const SCOPES: ContextMenuScope<ApiVersion>[] = [
-  "Scene",
-  "AudioTrack",
-  "MidiTrack",
   "AudioClip",
+  "AudioTrack",
+  "ClipSlot",
+  "DrumRack",
+  "MidiClip",
+  "MidiTrack",
+  "Sample",
+  "Scene",
+  "Simpler",
+  "ClipSlotSelection",
+  "AudioTrack.ArrangementSelection",
+  "MidiTrack.ArrangementSelection",
 ];
 
 export function activate(activation: ActivationContext) {
@@ -54,10 +69,14 @@ async function inspectProject(
 
   if (!snapshot) return;
 
+  const savedPath = await dumpJson(context, snapshot);
+
   const html = dialogHtml
     .replace("__API__", escapeHtml("1.0.0"))
     .replace("__TS__", escapeHtml(new Date().toISOString()))
+    .replace("__SAVED_PATH__", escapeHtml(savedPath ?? "(could not write file)"))
     .replace("__COUNTS__", renderCountsHtml(snapshot))
+    .replace("__ARRANGEMENT__", renderArrangementHtml(snapshot))
     .replace("__TREE__", renderTreeHtml(snapshot));
 
   await context.ui.showModalDialog(
@@ -256,6 +275,55 @@ function collectCuePoint(cp: CuePoint<ApiVersion>): CuePointInfo {
 }
 
 // ---------------------------------------------------------------------------
+// JSON dump
+// ---------------------------------------------------------------------------
+
+async function dumpJson(
+  context: ExtensionContext<ApiVersion>,
+  snapshot: Snapshot,
+): Promise<string | null> {
+  // Strategy: write the JSON to a scratch path we control, then ask Live's
+  // Resources API to import it into the current project folder. That gives us
+  // a stable, user-discoverable location (sitting next to the .als) instead of
+  // a hidden temp dir.
+  const scratchDir =
+    context.environment.tempDirectory ??
+    context.environment.storageDirectory ??
+    path.join(os.tmpdir(), "project-sync");
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const scratchFile = path.join(scratchDir, `project-sync-${stamp}.json`);
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    hostApiVersion: "1.0.0",
+    snapshot,
+  };
+
+  try {
+    await mkdir(scratchDir, { recursive: true });
+    await writeFile(scratchFile, JSON.stringify(payload, null, 2), "utf8");
+  } catch (e) {
+    console.error("[ProjectSync] failed to write scratch JSON:", e);
+    return null;
+  }
+
+  // Hand the file to Live; it copies it into the Set's project folder and
+  // returns the imported path. Falls back to the scratch path if the import
+  // fails (e.g. an unsaved Set with no project folder yet).
+  try {
+    const imported = await context.resources.importIntoProject(scratchFile);
+    console.log(`[ProjectSync] imported snapshot into project: ${imported}`);
+    return imported;
+  } catch (e) {
+    console.warn(
+      "[ProjectSync] importIntoProject failed; leaving file at scratch path:",
+      e,
+    );
+    return scratchFile;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HTML rendering (server-side)
 // ---------------------------------------------------------------------------
 
@@ -290,6 +358,139 @@ function renderCountsHtml(s: Snapshot): string {
         `<div class="chip"><span class="chip-k">${escapeHtml(k)}</span><span class="chip-v">${escapeHtml(v)}</span></div>`,
     )
     .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Arrangement view — pre-rendered timeline
+// ---------------------------------------------------------------------------
+
+function renderArrangementHtml(s: Snapshot): string {
+  // Find the rightmost beat we need to show. Everything is laid out in beat-
+  // space; the client picks pixels/beat at runtime so it can fit the chart to
+  // whatever width the dialog ends up at and respond to zoom + resize without
+  // a re-render.
+  let maxBeat = 16;
+  for (const t of s.audioTracks) {
+    for (const c of t.arrangementClips) if (c.endTime > maxBeat) maxBeat = c.endTime;
+    for (const lane of t.takeLanes) {
+      for (const c of lane.clips) if (c.endTime > maxBeat) maxBeat = c.endTime;
+    }
+  }
+  for (const cp of s.song.cuePoints) if (cp.time > maxBeat) maxBeat = cp.time;
+  maxBeat = Math.ceil(maxBeat / 4) * 4; // round up to next bar (4/4 assumed)
+
+  // Beat ruler — minor tick every beat, major + bar number every 4 beats.
+  const rulerTicks: string[] = [];
+  for (let b = 0; b <= maxBeat; b++) {
+    const isBar = b % 4 === 0;
+    rulerTicks.push(
+      `<div class="tick ${isBar ? "bar" : "beat"}" style="--at:${b}"></div>`,
+    );
+    if (isBar) {
+      rulerTicks.push(
+        `<div class="bar-num" style="--at:${b}">${b / 4 + 1}</div>`,
+      );
+    }
+  }
+
+  const cueLines = s.song.cuePoints
+    .map((cp, i) => {
+      return (
+        `<div class="cue-line" style="--at:${cp.time}"></div>` +
+        `<div class="cue-label" style="--at:${cp.time};top:${i % 2 === 0 ? 0 : 12}px">${escapeHtml(cp.name || "·")}</div>`
+      );
+    })
+    .join("");
+
+  const trackLanes = s.audioTracks.map(renderTrackLane).join("");
+
+  // `--total-beats` and `--px-per-beat` flow into every position calc below.
+  // The client sets --px-per-beat on load + on zoom + on resize.
+  return `
+    <div class="arr-wrap" data-total-beats="${maxBeat}" style="--total-beats:${maxBeat}; --px-per-beat:6px">
+      <div class="arr-toolbar">
+        <button class="alx-button small" id="arrZoomOut" title="Zoom out">−</button>
+        <button class="alx-button small" id="arrZoomFit" title="Fit to window">Fit</button>
+        <button class="alx-button small" id="arrZoomIn" title="Zoom in">+</button>
+        <span class="arr-zoom-display" id="arrZoomDisplay">—</span>
+        <div class="spacer"></div>
+        <span class="arr-summary">${s.audioTracks.length} tracks · ${s.totals.arrangementClipCount} clips · ${s.totals.takeLaneClipCount} take clips · ${maxBeat / 4} bars @ 4/4</span>
+      </div>
+      <div class="arr-scroll" id="arrScroll">
+        <div class="arr-ruler">${rulerTicks.join("")}</div>
+        <div class="arr-cues">${cueLines}</div>
+        <div class="arr-tracks">${trackLanes}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTrackLane(t: AudioTrackInfo): string {
+  const trackClips = t.arrangementClips
+    .map((c) => renderClipBar(c, "arr"))
+    .join("");
+
+  const takeLanes = t.takeLanes
+    .filter((l) => l.clips.length > 0)
+    .map((lane) => {
+      const clips = lane.clips.map((c) => renderClipBar(c, "take")).join("");
+      return `
+        <div class="lane take-lane">
+          <div class="lane-label sub">↳ ${escapeHtml(lane.name || "take")}</div>
+          <div class="lane-clips">${clips}</div>
+        </div>`;
+    })
+    .join("");
+
+  const flagBits: string[] = [];
+  if (t.mute) flagBits.push(`<span class="flag mute" title="Muted">M</span>`);
+  if (t.solo) flagBits.push(`<span class="flag solo" title="Solo">S</span>`);
+  if (t.arm)  flagBits.push(`<span class="flag arm"  title="Armed">●</span>`);
+  if (t.mutedViaSolo) flagBits.push(`<span class="flag dim" title="Muted via solo">m</span>`);
+  const flags = flagBits.join("");
+
+  return `
+    <div class="lane">
+      <div class="lane-label">
+        <span class="track-name">${escapeHtml(t.name)}</span>
+        <span class="flags">${flags}</span>
+      </div>
+      <div class="lane-clips">${trackClips}</div>
+    </div>
+    ${takeLanes}
+  `;
+}
+
+function renderClipBar(c: AudioClipInfo, variant: "arr" | "take"): string {
+  const start = c.startTime;
+  const span = Math.max(0.001, c.endTime - c.startTime);
+
+  let loopOverlay = "";
+  if (c.looping) {
+    const loopX = c.loopStart - c.startTime;
+    const loopW = Math.max(0.001, c.loopEnd - c.loopStart);
+    loopOverlay = `<div class="loop" style="--lx:${loopX};--lw:${loopW}"></div>`;
+  }
+
+  const tip = [
+    c.name || "(unnamed)",
+    `start ${c.startTime.toFixed(2)} → end ${c.endTime.toFixed(2)}  (${span.toFixed(2)} beats)`,
+    c.looping ? `loop ${c.loopStart.toFixed(2)}–${c.loopEnd.toFixed(2)}` : "no loop",
+    `warp: ${c.warping ? c.warpMode.name : "off"}`,
+    c.filePath,
+  ].join("\n");
+
+  const label = `<span class="clip-label">${escapeHtml(c.name || basename(c.filePath))}</span>`;
+  return (
+    `<div class="clip ${variant}${c.muted ? " muted" : ""}" ` +
+    `style="--start:${start};--span:${span};background:${escapeHtml(c.colorHex)}" ` +
+    `title="${escapeHtml(tip)}">${loopOverlay}${label}</div>`
+  );
+}
+
+function basename(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i >= 0 ? p.slice(i + 1) : p;
 }
 
 function renderTreeHtml(s: Snapshot): string {

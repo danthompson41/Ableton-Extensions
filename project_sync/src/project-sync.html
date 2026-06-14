@@ -116,12 +116,93 @@
       });
     }
 
+    function switchTab(name) {
+      document.querySelectorAll(".tab").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tab === name);
+      });
+      document.querySelectorAll(".panel").forEach((p) => {
+        p.classList.toggle("hidden", p.dataset.panel !== name);
+      });
+      document.querySelectorAll(".tab-controls").forEach((c) => {
+        c.classList.toggle("hidden", c.dataset.for !== name);
+      });
+      // The Fit math needs the scroll container to actually have a size, which
+      // it doesn't while the panel is hidden — re-fit when we switch in.
+      if (name === "arrangement" && !arr.userZoomed) requestAnimationFrame(arr.fit);
+    }
+
+    // ---------- arrangement zoom + responsive fit ----------
+    const arr = {
+      wrap: null,
+      scroll: null,
+      totalBeats: 0,
+      pxPerBeat: 6,
+      userZoomed: false,
+      labelColumnPx: 140,
+      minPxPerBeat: 0.25,
+      maxPxPerBeat: 80,
+      init() {
+        this.wrap = document.querySelector(".arr-wrap");
+        this.scroll = document.getElementById("arrScroll");
+        if (!this.wrap || !this.scroll) return;
+        this.totalBeats = Number(this.wrap.dataset.totalBeats) || 16;
+        const inb = document.getElementById("arrZoomIn");
+        const out = document.getElementById("arrZoomOut");
+        const fit = document.getElementById("arrZoomFit");
+        if (inb) inb.onclick = () => this.zoom(1.5);
+        if (out) out.onclick = () => this.zoom(1 / 1.5);
+        if (fit) fit.onclick = () => { this.userZoomed = false; this.fit(); };
+        // Auto-refit on dialog resize until the user zooms manually.
+        const ro = new ResizeObserver(() => {
+          if (!this.userZoomed) this.fit();
+        });
+        ro.observe(this.scroll);
+        this.fit();
+      },
+      apply() {
+        if (!this.wrap) return;
+        this.wrap.style.setProperty("--px-per-beat", this.pxPerBeat + "px");
+        // Density classes: dim down the bar-label cadence as we zoom out so
+        // numbers don't pile on top of each other. (Bars are 4 beats apart.)
+        const pxPerBar = this.pxPerBeat * 4;
+        this.wrap.classList.toggle("dense-1", pxPerBar < 60 && pxPerBar >= 30);
+        this.wrap.classList.toggle("dense-2", pxPerBar < 30 && pxPerBar >= 12);
+        this.wrap.classList.toggle("dense-3", pxPerBar < 12);
+        this.wrap.classList.toggle("tight", this.pxPerBeat < 10);
+        const disp = document.getElementById("arrZoomDisplay");
+        if (disp) disp.textContent = `${this.pxPerBeat.toFixed(2)} px/beat`;
+      },
+      fit() {
+        if (!this.scroll) return;
+        const w = this.scroll.clientWidth - this.labelColumnPx - 4;
+        if (w <= 0 || this.totalBeats <= 0) return;
+        const target = w / this.totalBeats;
+        this.pxPerBeat = clamp(target, this.minPxPerBeat, this.maxPxPerBeat);
+        this.apply();
+      },
+      zoom(factor) {
+        this.userZoomed = true;
+        this.pxPerBeat = clamp(this.pxPerBeat * factor, this.minPxPerBeat, this.maxPxPerBeat);
+        this.apply();
+      },
+    };
+    function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
     document.addEventListener("DOMContentLoaded", () => {
       attachToggles();
+      arr.init();
+      document.querySelectorAll(".tab").forEach((b) => {
+        b.onclick = () => switchTab(b.dataset.tab);
+      });
+      switchTab("arrangement");
       document.getElementById("expandAll").onclick = () => setAllCollapsed(false);
       document.getElementById("collapseAll").onclick = () => setAllCollapsed(true);
       document.getElementById("copy").onclick = copyTreeText;
       document.getElementById("close").onclick = closeDialog;
+      document.getElementById("copyPath").onclick = () => {
+        const path = document.getElementById("savedPath").textContent || "";
+        navigator.clipboard.writeText(path).then(() => flash("Copied path"));
+      };
       document.getElementById("filter").addEventListener("input", applyFilter);
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") closeDialog();
@@ -179,6 +260,21 @@
     .title-row { display: flex; align-items: baseline; gap: 0.6em; }
     .title { font-size: 1.35rem; color: var(--c-text-primary); }
     .meta { color: var(--c-text-secondary); font-variant-numeric: tabular-nums; }
+
+    .saved-row { display: flex; align-items: center; gap: 0.5em; }
+    .saved-row .label { color: var(--c-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.85rem; }
+    .saved-row .path {
+      flex: 1;
+      background: var(--c-input-bg);
+      border: 1px solid var(--c-control-border);
+      padding: 2px 8px;
+      font-family: "AbletonSansMono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--c-string);
+      font-size: 11px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      user-select: all;
+    }
+    .alx-button.small { font-size: 0.95rem; padding: 0 0.7em; height: 20px; }
 
     .counts { display: flex; flex-wrap: wrap; gap: 0.35em; }
     .chip {
@@ -258,6 +354,185 @@
       vertical-align: middle; border-radius: 2px;
     }
 
+    .tabs { display: flex; gap: 0.4em; align-items: center; }
+    .tab { opacity: 0.7; }
+    .tab.active { opacity: 1; color: var(--c-on-foreground); background-color: var(--c-accent); }
+    .tab-controls { display: flex; gap: 0.4em; align-items: center; }
+    .tab-controls.hidden { display: none; }
+
+    .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .panel.hidden { display: none; }
+
+    /* ---------- arrangement view ---------- */
+    /* All position math is `<beats> * var(--px-per-beat)` so the entire chart
+       rescales by mutating a single CSS variable. */
+    .arr-wrap {
+      flex: 1; min-height: 0;
+      background: var(--c-input-bg);
+      border: 1px solid var(--c-control-border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+
+    .arr-toolbar {
+      display: flex; align-items: center; gap: 0.35em;
+      padding: 4px 8px;
+      background: hsl(0, 0%, 17%);
+      border-bottom: 1px solid var(--c-control-border);
+    }
+    .arr-toolbar .spacer { flex: 1; }
+    .arr-toolbar .arr-zoom-display {
+      color: var(--c-text-secondary);
+      font-variant-numeric: tabular-nums;
+      font-size: 10.5px;
+      min-width: 6em;
+    }
+    .arr-toolbar .arr-summary {
+      color: var(--c-text-secondary);
+      font-variant-numeric: tabular-nums;
+      font-size: 10.5px;
+    }
+
+    .arr-scroll {
+      flex: 1; min-height: 0;
+      overflow: auto;
+      position: relative;
+      display: grid;
+      grid-template-columns: 140px calc(var(--total-beats) * var(--px-per-beat));
+      grid-template-rows: 22px 16px auto;
+      grid-template-areas:
+        ". ruler"
+        ". cues"
+        "labels tracks";
+    }
+    .arr-ruler {
+      grid-area: ruler;
+      position: sticky; top: 0;
+      background: hsl(0, 0%, 14%);
+      border-bottom: 1px solid var(--c-control-border);
+      height: 22px;
+      z-index: 3;
+    }
+    .arr-ruler .tick {
+      position: absolute; top: 0; bottom: 0;
+      width: 1px;
+      background: hsl(0, 0%, 22%);
+      left: calc(var(--at) * var(--px-per-beat));
+    }
+    .arr-ruler .tick.bar { background: hsl(0, 0%, 35%); }
+    .arr-ruler .bar-num {
+      position: absolute; top: 4px;
+      left: calc(var(--at) * var(--px-per-beat) + 2px);
+      color: var(--c-text-secondary);
+      font-size: 9.5px;
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
+    }
+    /* When zoomed out, ruler labels would overlap — show only every Nth bar. */
+    .arr-wrap.dense-1 .bar-num:nth-child(odd) { display: none; }
+    .arr-wrap.dense-2 .bar-num:not(:nth-child(8n+1)) { display: none; }
+    .arr-wrap.dense-3 .bar-num:not(:nth-child(16n+1)) { display: none; }
+
+    .arr-cues {
+      grid-area: cues;
+      position: sticky; top: 22px;
+      height: 16px;
+      background: hsl(0, 0%, 14%);
+      border-bottom: 1px dotted hsl(0, 0%, 22%);
+      z-index: 2;
+    }
+    .arr-cues .cue-line {
+      position: absolute; top: 0; bottom: -10000px;
+      width: 1px;
+      left: calc(var(--at) * var(--px-per-beat));
+      background: hsl(31, 100%, 67%);
+      opacity: 0.55;
+      z-index: 1;
+    }
+    .arr-cues .cue-label {
+      position: absolute;
+      left: calc(var(--at) * var(--px-per-beat) + 2px);
+      color: hsl(31, 100%, 75%);
+      font-size: 9.5px;
+      padding: 0 3px;
+      background: hsl(0, 0%, 14%);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .arr-tracks { grid-area: tracks; position: relative; min-width: 0; }
+
+    .lane { display: contents; }
+    .lane .lane-label {
+      grid-column: 1;
+      position: sticky; left: 0;
+      background: hsl(0, 0%, 17%);
+      border-right: 1px solid var(--c-control-border);
+      border-bottom: 1px solid hsl(0, 0%, 14%);
+      padding: 4px 8px;
+      display: flex; align-items: center; gap: 0.4em;
+      height: 28px;
+      z-index: 2;
+    }
+    .lane .lane-label.sub {
+      background: hsl(0, 0%, 15%);
+      color: var(--c-text-secondary);
+      font-size: 10.5px;
+      padding-left: 18px;
+      height: 18px;
+    }
+    .lane .track-name { color: var(--c-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lane .flags { display: flex; gap: 0.2em; margin-left: auto; }
+    .lane .flag {
+      display: inline-block; width: 14px; height: 14px;
+      line-height: 14px; text-align: center; border-radius: 2px;
+      font-size: 9.5px; font-weight: 700;
+      background: hsl(0, 0%, 14%);
+      color: var(--c-text-secondary);
+    }
+    .lane .flag.mute { color: hsl(0, 70%, 75%); }
+    .lane .flag.solo { color: hsl(50, 90%, 70%); }
+    .lane .flag.arm { color: hsl(0, 80%, 65%); }
+
+    .lane .lane-clips {
+      grid-column: 2;
+      position: relative;
+      height: 28px;
+      border-bottom: 1px solid hsl(0, 0%, 14%);
+    }
+    .take-lane .lane-clips { height: 18px; background: hsl(0, 0%, 12%); }
+
+    .clip {
+      position: absolute; top: 3px; bottom: 3px;
+      left: calc(var(--start) * var(--px-per-beat));
+      width: calc(var(--span) * var(--px-per-beat));
+      min-width: 2px;
+      border-radius: 2px;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+      cursor: default;
+    }
+    .clip.take { top: 2px; bottom: 2px; }
+    .clip.muted { opacity: 0.4; }
+    .clip:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55); z-index: 4; }
+    .clip .clip-label {
+      position: absolute; left: 3px; right: 3px; top: 50%; transform: translateY(-50%);
+      color: rgba(0, 0, 0, 0.78);
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      pointer-events: none;
+    }
+    /* Hide the clip name on bars that are too narrow to fit any text. */
+    .arr-wrap.tight .clip-label { display: none; }
+    .clip .loop {
+      position: absolute; top: 0; bottom: 0;
+      left: calc(var(--lx) * var(--px-per-beat));
+      width: calc(var(--lw) * var(--px-per-beat));
+      border-left: 1px dashed rgba(0, 0, 0, 0.55);
+      border-right: 1px dashed rgba(0, 0, 0, 0.55);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
     .footer { display: flex; align-items: center; gap: 0.6em; }
     .footer .flash {
       color: var(--c-accent); opacity: 0; transition: opacity 200ms ease;
@@ -273,17 +548,29 @@
       <div class="title">Project Sync — SDK Metadata</div>
       <div class="meta">API __API__ · __TS__</div>
     </div>
+    <div class="saved-row">
+      <span class="label">Saved JSON</span>
+      <code class="path" id="savedPath">__SAVED_PATH__</code>
+      <button class="alx-button small" id="copyPath" title="Copy path">Copy path</button>
+    </div>
     <div class="counts" id="counts">__COUNTS__</div>
-    <div class="controls">
-      <input class="alx-input" id="filter" type="search" placeholder="Filter (cmd-F) — name, key, value…" />
-      <button class="alx-button" id="expandAll">Expand all</button>
-      <button class="alx-button" id="collapseAll">Collapse all</button>
+    <div class="tabs">
+      <button class="alx-button tab active" data-tab="arrangement">Arrangement</button>
+      <button class="alx-button tab" data-tab="tree">Tree</button>
       <div class="spacer"></div>
-      <button class="alx-button" id="copy">Copy tree</button>
+      <div class="controls tab-controls" data-for="tree">
+        <input class="alx-input" id="filter" type="search" placeholder="Filter (cmd-F) — name, key, value…" />
+        <button class="alx-button" id="expandAll">Expand all</button>
+        <button class="alx-button" id="collapseAll">Collapse all</button>
+        <button class="alx-button" id="copy">Copy tree</button>
+      </div>
     </div>
   </header>
 
-  <div class="tree-wrap" id="tree">__TREE__</div>
+  <div class="panel" data-panel="arrangement">__ARRANGEMENT__</div>
+  <div class="panel hidden" data-panel="tree">
+    <div class="tree-wrap" id="tree">__TREE__</div>
+  </div>
 
   <div class="footer">
     <span class="flash" id="flash"></span>
