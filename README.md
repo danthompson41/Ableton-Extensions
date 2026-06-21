@@ -10,6 +10,7 @@ build setup, and README.
 | -------------------------------------- | ------------------------------------------------------------------------ |
 | [`mlr/`](mlr/)                         | A monome/norns **MLR**-style loop chopper — slices a warped audio clip into N equal segments mapped across the Session View grid. |
 | [`project_sync/`](project_sync/)       | **Project Sync** — read-only inspector that walks the current Set and shows every piece of metadata the SDK exposes (song, tracks, devices, clips, scenes, …) in a searchable tree. |
+| [`move_export/`](move_export/)         | **Move Export** — exports the current Set into the **Ableton Move** project format (`Song.abl` + `Samples/`, optionally `.ablbundle`) for loading onto a Move. *Song structure + Drum Rack mapping verified against real Sets; melodic instruments WIP.* |
 
 ## Getting started
 

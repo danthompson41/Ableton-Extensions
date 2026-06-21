@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Move Export</title>
+  <script>
+    const isWebKit = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.live;
+    const isWebView2 = window.chrome && window.chrome.webview;
+    function send(message) {
+      if (isWebKit) window.webkit.messageHandlers.live.postMessage(message);
+      else if (isWebView2) window.chrome.webview.postMessage(message);
+    }
+    function closeDialog() {
+      send({ method: "close_and_send", params: [JSON.stringify({ closed: true })] });
+    }
+  </script>
+  <style>
+    :root {
+      --bg: #1c1c1c;
+      --panel: #262626;
+      --fg: #e8e8e8;
+      --muted: #9a9a9a;
+      --accent: #ffd24a;
+      --warn: #ffb84a;
+      --border: #383838;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 20px;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 18px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+    .row .k { color: var(--muted); }
+    .row .v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; text-align: right; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
+    ul.warnings { margin: 0; padding-left: 18px; }
+    ul.warnings li { color: var(--warn); margin: 3px 0; }
+    .footer { display: flex; justify-content: flex-end; margin-top: 18px; }
+    button.alx-button {
+      background: var(--accent);
+      color: #1a1a1a;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.alx-button:hover { filter: brightness(1.06); }
+  </style>
+</head>
+
+<body>
+  <h1>Exported to Ableton Move</h1>
+  <p class="sub">Set “__SET_NAME__” was written in the Move project format.</p>
+
+  <div class="card">
+    <div class="row"><span class="k">Set folder</span><span class="v">__SET_DIR__</span></div>
+    <div class="row"><span class="k">Bundle</span><span class="v">__BUNDLE__</span></div>
+    <div class="row"><span class="k">Samples</span><span class="v">__SAMPLES__</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Warnings</h2>
+    <ul class="warnings">__WARNINGS__</ul>
+  </div>
+
+  <div class="footer">
+    <button class="alx-button" onclick="closeDialog()">Done</button>
+  </div>
+</body>
+
+</html>

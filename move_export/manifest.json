@@ -1,0 +1,7 @@
+{
+    "name": "Move Export — Ableton Move Set Exporter",
+    "author": "Ableton Extensions Examples",
+    "entry": "dist/extension.js",
+    "version": "0.0.1",
+    "minimumApiVersion": "1.0.0"
+}
